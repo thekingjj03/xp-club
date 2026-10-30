@@ -56,11 +56,19 @@ create table if not exists public.quest_ideas (
 create index if not exists quest_ideas_created_at_idx on public.quest_ideas(created_at desc);
 create index if not exists quest_ideas_submitter_idx on public.quest_ideas(submitter_auth_id,created_at desc);
 
+create table if not exists public.quest_idea_hides (
+  hider_auth_id uuid not null references auth.users(id) on delete cascade,
+  idea_id uuid not null references public.quest_ideas(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (hider_auth_id, idea_id)
+);
+
 alter table public.players enable row level security;
 alter table public.player_accounts enable row level security;
 alter table public.quests enable row level security;
 alter table public.reset_votes enable row level security;
 alter table public.quest_ideas enable row level security;
+alter table public.quest_idea_hides enable row level security;
 drop policy if exists "signed in players can read roster" on public.players;
 create policy "signed in players can read roster" on public.players for select to authenticated using (true);
 drop policy if exists "signed in players can read quests" on public.quests;
@@ -72,9 +80,12 @@ drop policy if exists "signed in players can read reset vote" on public.reset_vo
 create policy "signed in players can read reset vote" on public.reset_votes for select to authenticated using (auth.jwt()->>'is_anonymous' is distinct from 'true');
 drop policy if exists "signed in users can read quest ideas" on public.quest_ideas;
 create policy "signed in users can read quest ideas" on public.quest_ideas for select to authenticated using (true);
-revoke all on public.players, public.quests, public.reset_votes, public.quest_ideas from anon;
+drop policy if exists "users can read their own hidden ideas" on public.quest_idea_hides;
+create policy "users can read their own hidden ideas" on public.quest_idea_hides for select to authenticated using (hider_auth_id = auth.uid());
+revoke all on public.players, public.quests, public.reset_votes, public.quest_ideas, public.quest_idea_hides from anon;
 revoke insert, update, delete on public.players, public.quests, public.reset_votes, public.quest_ideas from authenticated;
-grant select on public.players, public.quests, public.reset_votes, public.quest_ideas to authenticated;
+revoke all on public.quest_idea_hides from authenticated;
+grant select on public.players, public.quests, public.reset_votes, public.quest_ideas, public.quest_idea_hides to authenticated;
 revoke all on public.player_accounts from anon, authenticated;
 
 create or replace function public.current_xp_player() returns text
@@ -106,6 +117,32 @@ begin
   insert into public.quest_ideas(category,submitted_by,submitter_auth_id,title,detail)
   values(v_category,v_name,auth.uid(),trim(p_title),left(coalesce(p_detail,''),240)) returning * into v_idea;
   return v_idea;
+end; $$;
+
+create or replace function public.delete_quest_idea(p_idea_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'Sign in before deleting an idea.'; end if;
+  delete from public.quest_ideas where id=p_idea_id and submitter_auth_id=auth.uid();
+  if not found then raise exception 'You can only delete an idea you submitted.'; end if;
+end; $$;
+
+create or replace function public.hide_quest_idea(p_idea_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'Sign in before hiding an idea.'; end if;
+  if not exists(select 1 from public.quest_ideas where id=p_idea_id and submitter_auth_id<>auth.uid()) then
+    raise exception 'You can only hide someone else’s idea.';
+  end if;
+  insert into public.quest_idea_hides(hider_auth_id,idea_id) values(auth.uid(),p_idea_id)
+  on conflict (hider_auth_id,idea_id) do nothing;
+end; $$;
+
+create or replace function public.unhide_quest_idea(p_idea_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'Sign in before restoring an idea.'; end if;
+  delete from public.quest_idea_hides where hider_auth_id=auth.uid() and idea_id=p_idea_id;
 end; $$;
 
 create or replace function public.xp_recipient(p_assigner text, p_date date) returns text
@@ -221,6 +258,9 @@ revoke all on function public.propose_reset() from public, anon;
 revoke all on function public.approve_reset() from public, anon;
 revoke all on function public.cancel_reset() from public, anon;
 revoke all on function public.submit_quest_idea(text,text,text) from public, anon;
+revoke all on function public.delete_quest_idea(uuid) from public, anon;
+revoke all on function public.hide_quest_idea(uuid) from public, anon;
+revoke all on function public.unhide_quest_idea(uuid) from public, anon;
 grant execute on function public.current_xp_player() to authenticated;
 grant execute on function public.create_quest(date,text,text,integer,jsonb) to authenticated;
 grant execute on function public.complete_quest(uuid) to authenticated;
@@ -229,3 +269,6 @@ grant execute on function public.propose_reset() to authenticated;
 grant execute on function public.approve_reset() to authenticated;
 grant execute on function public.cancel_reset() to authenticated;
 grant execute on function public.submit_quest_idea(text,text,text) to authenticated;
+grant execute on function public.delete_quest_idea(uuid) to authenticated;
+grant execute on function public.hide_quest_idea(uuid) to authenticated;
+grant execute on function public.unhide_quest_idea(uuid) to authenticated;
