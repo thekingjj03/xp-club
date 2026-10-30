@@ -1,11 +1,11 @@
 # XP Club
 
-A Spanish-class side-quest game for Jordon, Justin, and Raul. Supabase provides shared data, individual logins, and database-enforced game rules.
+A Spanish-class side-quest game for Jordon, Justin, Raul, and Lyle. Supabase provides shared quests, individual logins, XP, and database-enforced game rules.
 
-## Set up the shared backend
+## Set up Supabase
 
-Follow [`SETUP.md`](SETUP.md): create a Supabase project, run [`schema.sql`](schema.sql), create one email/password login for each player, and link each login to its player profile. Then put the project URL and **publishable key** in `supabase-config.js`. Never use a `service_role` key or database password in the website.
+Follow [SETUP.md](SETUP.md). For a new database, run [schema.sql](schema.sql); for the existing XP Club database, run [migration-2026-10-29.sql](migration-2026-10-29.sql). Set the Supabase project URL and publishable key in supabase-config.js. Never put a service-role key or database password in the public site.
 
 ## Hosting
 
-This public repository includes a GitHub Actions workflow in `.github/workflows/deploy.yml` that deploys the static site to GitHub Pages. Choose **GitHub Actions** as the Pages publishing source in repository Settings. The website source and player display names are public; game actions and data are protected by Supabase authentication and database rules.
+The GitHub Actions workflow in .github/workflows/deploy.yml publishes the static site to GitHub Pages. The site and player display names are public. Supabase authentication and database rules restrict quest actions. Guest sessions can view the all-time leaderboard and recent quests, and can submit named ideas.
